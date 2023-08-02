@@ -1,12 +1,15 @@
 import numpy as np
 import pandas as pd
-# import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeClassifier, plot_tree
+import tensorflow as tf
+import keras
+from keras import models, layers, utils, backend as K
+import shap
 
 
 def one_hot_encode(dataframe, column):
@@ -23,18 +26,15 @@ def one_hot_encode(dataframe, column):
     dataframe = dataframe.drop([column], axis = 1)
     return dataframe
 
-def preprocess(path):
-    # read csv
-    dataframe = pd.read_csv(path)
-    # subset dataframe
-    #subset = dataframe.loc[((dataframe['impervious_1'] > 0) & (dataframe['impervious_1'] <= 100))]
+def preprocess(dataframe):
     # reset index
     subset = dataframe
     subset = subset.reset_index(drop=True)
     # fill invalid values
-    subset['dem_1'] = subset['dem_1'].replace(-9999, subset['dem_1'].mean())
+    subset['dem_1'] = subset['dem_1'].replace(-9999, 0)
     subset['aspect_1'] = subset['aspect_1'].replace(255, 18)
     subset['wetlands_1'] = subset['wetlands_1'].replace(-1, 0)
+    subset['wetlands_1'] = subset['wetlands_1'].replace(255, 8)
     subset['posidex_1'] = subset['posidex_1'].replace(-1, 0)
     # one hot encode categorical features
     subset = one_hot_encode(subset, "aspect_1")
@@ -57,7 +57,8 @@ def binary_classification_preprocess(dataframe):
     return dataframe
 
 def linear_regression(path):
-    dataset = preprocess(path)
+    dataframe = pd.read_csv(path)
+    dataset = preprocess(dataframe)
     # define target and feature variables
     target = 'impervious_1'
     features = [
@@ -91,6 +92,35 @@ def logistic_regression(path):
     model.fit(X_train, y_train)
     return model
 
+def decision_tree(path, depth):
+    dataframe = pd.read_csv(path)
+    dataset = binary_classification_preprocess(dataframe)
+    target = 'class'
+    features = [
+        'landsat_1', 'landsat_2', 'landsat_3', 'landsat_4', 'landsat_5', 'landsat_6']
+    X = dataset[features]
+    y = dataset[target]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
+    model = DecisionTreeClassifier(max_depth=depth, random_state=1, max_features='sqrt')
+    model = model.fit(X_train, y_train)
+    class_names = ['non-impervious', 'impervious']
+    plt.figure(figsize=(18,10))
+    plot_tree(model, feature_names=features, filled=True, class_names=class_names,  fontsize=9)
+    return model
+
+def random_forest(path):
+    dataframe = pd.read_csv(path)
+    dataset = binary_classification_preprocess(dataframe)
+    target = 'class'
+    features = [
+        'landsat_1', 'landsat_2', 'landsat_3', 'landsat_4', 'landsat_5', 'landsat_6']
+    X = dataset[features]
+    y = dataset[target]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
+    model = RandomForestRegressor(n_estimators = 100, random_state = 100)
+    model = model.fit(X_train, y_train)
+    return model
+
 def multiclass_classification_preprocess(path):
     # read csv
     dataframe = pd.read_csv(path)
@@ -109,3 +139,31 @@ def multiclass_classification_preprocess(path):
     subset = one_hot_encode(subset, "wetlands_1")
     # return transformed dataframe
     return subset
+
+def nn_regression_preprocess(dataframe):
+    dataset = preprocess(dataframe)
+    dataset[['landsat_1', 'landsat_2', 'landsat_3', 'landsat_4', 'landsat_5', 'landsat_6', 'dem_1']] = dataset[['landsat_1', 'landsat_2', 'landsat_3', 'landsat_4', 'landsat_5', 'landsat_6', 'dem_1']] / 10000.
+    dataset['NDVI'] = (dataset['landsat_4'] - dataset['landsat_3']) / (dataset['landsat_4'] + dataset['landsat_3'])
+    dataset['posidex_1'] = dataset['posidex_1'] / 100.
+    return dataset
+
+def neural_net(path):
+    dataset = nn_regression_preprocess(path)
+    target = 'impervious_1'
+    features = [
+        'landsat_1', 'landsat_2', 'landsat_3', 'landsat_4', 'landsat_5', 'landsat_6',  
+        'aspect_1_0', 'aspect_1_1', 'aspect_1_2', 'aspect_1_3', 'aspect_1_4',
+        'aspect_1_5', 'aspect_1_6', 'aspect_1_7', 'aspect_1_8', 'aspect_1_9', 
+        'aspect_1_10', 'aspect_1_11', 'aspect_1_12', 'aspect_1_13', 'aspect_1_14',
+        'aspect_1_15', 'aspect_1_16', 'aspect_1_17','aspect_1_18', 
+        'wetlands_1_0', 'wetlands_1_2', 'wetlands_1_3', 'wetlands_1_4', 
+        'wetlands_1_5', 'wetlands_1_6', 'wetlands_1_7', 'wetlands_1_8',
+        'dem_1', 'posidex_1', 'NDVI'
+    ]
+    X = dataset[features]
+    y = dataset[target]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
+    model = DNN_functional(36, 1, 'linear')
+    print('saving model')
+    history = run_training(model, (X_train, y_train), (X_test, y_test), 10, 1024, 1e-4, 'adam', 'mse', 'mae')
+
